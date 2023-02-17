@@ -9,7 +9,7 @@ $ vagrant plugin install yaml vagrant-reload
 ## Setup Cluster
 
 - single control-plan node
-- multiple control-plan nodes (includes loadbalancer - haproxy)
+- multiple control-plan nodes (incl. loadbalancer - haproxy)
 
 ```settings.yaml
 ---
