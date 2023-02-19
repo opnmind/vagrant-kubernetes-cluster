@@ -5,7 +5,7 @@ set -euxo pipefail
 config_path="/vagrant/configs"
 
 # DNS Setting
-sudo mkdir /etc/systemd/resolved.conf.d/
+sudo mkdir -p /etc/systemd/resolved.conf.d/
 cat <<EOF | sudo tee /etc/systemd/resolved.conf.d/dns_servers.conf
 [Resolve]
 DNS=${DNS_SERVERS}
