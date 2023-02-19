@@ -42,8 +42,8 @@ helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo update
 
 # Installing dashboard service
-mkdir -p /dashboard
-cat <<EOF | tee ./dashboard/dashboard.sh
+mkdir -p ~/dashboard
+cat <<EOF | tee ~/dashboard/dashboard.sh
 #!/bin/bash
 showtoken=1
 cmd="kubectl proxy"
