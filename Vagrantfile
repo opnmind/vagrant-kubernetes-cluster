@@ -188,7 +188,7 @@ class KubernetesLab
         
         worker.vm.provision "shell", 
           env: {
-            "WORK_IP" => workerIp,
+            "WORKER_IP" => workerIp,
             "WORKER_HOSTNAME" => "worker-#{i}",
             "MASTER_TYPE" => masterType,
             "LAB_DOMAIN" => @settings["network"]["lab_domain"],

@@ -3,6 +3,7 @@
 # Setup for Control Plane (Master) servers
 
 set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
 
 NODE=${MASTER_HOSTNAME#*-}
 echo "NODE: $NODE"
@@ -19,13 +20,9 @@ if [ "$MASTER_TYPE" = "single" ] || [ "$NODE" -eq 1 ]; then
     export CERTIFICATE_KEY
     export KUBEADM_TOKEN
 
-    if [ -d $config_path ]; then
-        rm -f $config_path/*
-        rm -rf $log_path
-    else
-        mkdir -p $log_path
-        mkdir -p $config_path
-    fi
+    if [ -d $config_path ]; then rm -f $config_path/*; fi
+    if [ -d $log_path ]; then rm -rf $log_path; fi
+    mkdir -p $config_path $log_path
 fi
 
 echo "Preflight Check Passed: Downloaded All Required Images"
@@ -42,7 +39,8 @@ if [ "$MASTER_TYPE" = "single" ]; then
         --upload-certs \
         --ignore-preflight-errors Swap | tee /vagrant/logs/kubeadm-init.log
     
-    join_cmd=$(sudo kubeadm token create --print-join-command)
+    export KUBECONFIG=/etc/kubernetes/admin.conf    
+    join_cmd=$(kubeadm token create --print-join-command)
     echo "sudo $join_cmd" > $config_path/join-worker.sh
     chmod +x $config_path/join-worker.sh
 else
@@ -89,10 +87,19 @@ if [ "$MASTER_TYPE" = "single" ] || [ "$NODE" -eq 1 ]; then
 
     # Install Metrics Server (https://github.com/kubernetes-sigs/metrics-server)
     if [ "$MASTER_TYPE" = "single" ]; then
-        kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+        # kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml	
+        curl -L -O https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+        sed -i "/- --secure-port=4443/a\ \ \ \ \ \ \ \ - --kubelet-insecure-tls=true" ./components.yaml
+        sed -i "/containers:/i\ \ \ \ \ \ hostNetwork: true" ./components.yaml
+        sed -i "s/kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname/kubelet-preferred-address-types=InternalIP/g" ./components.yaml
+        kubectl apply -f ./components.yaml           
     else
-        # TODO: cert issue
-        echo "kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml"
+        #kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml
+        curl -L https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml -O ./components.yaml
+        sed -i "/- --secure-port=4443/a\ \ \ \ \ \ \ \ - --kubelet-insecure-tls=true" ./components.yaml
+        sed -i "/containers:/i\ \ \ \ \ \ hostNetwork: true" ./components.yaml
+        sed -i "s/kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname/kubelet-preferred-address-types=InternalIP/g" ./components.yaml
+        kubectl apply -f ./components.yaml
     fi    
 fi
 

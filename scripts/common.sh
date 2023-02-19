@@ -3,6 +3,7 @@
 # Common setup for all servers (Control Plane and Nodes)
 
 set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
 
 # DNS Setting
 sudo mkdir /etc/systemd/resolved.conf.d/
@@ -19,9 +20,11 @@ sudo swapoff -a
 # keeps the swap off during reboot
 (crontab -l 2>/dev/null; echo "@reboot /sbin/swapoff -a") | crontab - || true
 
-sudo apt-get update -y
-# Install CRI-O Runtime
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo apt-get install -y apt-transport-https ca-certificates curl gnupg2 software-properties-common
 
+# Install CRI-O Runtime
 VERSION="$(echo "${KUBERNETES_VERSION}" | grep -oE '[0-9]+\.[0-9]+')"
 
 # Create the .conf file to load the modules at bootup
@@ -53,15 +56,15 @@ curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/
 curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/Release.key | sudo apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers.gpg add -
 
 sudo apt-get update
-sudo apt-get install cri-o cri-o-runc -y
+sudo apt-get install -y cri-o cri-o-runc
 
 sudo systemctl daemon-reload
 sudo systemctl enable crio --now
 
+sudo apt install containernetworking-plugins cri-tools
+
 echo "CRI runtime installed susccessfully"
 
-sudo apt-get update
-sudo apt-get install -y apt-transport-https ca-certificates curl
 sudo curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
 
 echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
@@ -72,6 +75,8 @@ sudo apt-get install -y \
     kubeadm="$KUBERNETES_VERSION" \
     etcd-client \
     jq
+
+sudo apt-mark hold kubelet kubeadm kubectl
 
 local_ip="$(ip --json a s | jq -r '.[] | if .ifname == "eth1" then .addr_info[] | if .family == "inet" then .local else empty end else empty end')"
 cat > /etc/default/kubelet << EOF

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euxo pipefail
+
 config_path="/vagrant/configs"
 $config_path/join-worker.sh
 
@@ -18,4 +20,3 @@ sudo chown 1000:1000 /home/vagrant/.kube/config
 NODENAME=$(hostname -s)
 kubectl label node $(hostname -s) node-role.kubernetes.io/worker=worker
 EOF
-
