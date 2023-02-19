@@ -42,8 +42,8 @@ helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo update
 
 # Installing dashboard service
-mkdir -p ~/dashboard
-cat <<EOF | tee ~/dashboard/dashboard.sh
+mkdir -p /home/vagrant/dashboard
+cat <<EOF | tee /home/vagrant/dashboard/dashboard.sh
 #!/bin/bash
 showtoken=1
 cmd="kubectl proxy"
@@ -109,8 +109,10 @@ if [ \$showtoken -gt 0 ]; then
 fi
 EOF
 
-chmod +x ~/dashboard/dashboard.sh
-sudo ln -s ~/dashboard/dashboard.sh /usr/local/bin/dashboard
+sudo chown vagrant:vagrant /home/vagrant/dashboard/dashboard.sh
+chmod +x /home/vagrant/dashboard/dashboard.sh
+sudo rm -f /usr/local/bin/dashboard
+sudo ln -s /home/vagrant/dashboard/dashboard.sh /usr/local/bin/dashboard
 
 # Install Traefik
 #kubectl apply -f 00-role.yml \
