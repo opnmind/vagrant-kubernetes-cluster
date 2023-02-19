@@ -43,7 +43,7 @@ helm repo update
 
 # Installing dashboard service
 mkdir -p /dashboard
-cat <<EOF >>./dashboard/dashboard.sh
+cat <<EOF | tee ./dashboard/dashboard.sh
 #!/bin/bash
 showtoken=1
 cmd="kubectl proxy"
