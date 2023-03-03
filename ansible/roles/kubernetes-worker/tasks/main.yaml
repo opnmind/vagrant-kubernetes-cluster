@@ -1,0 +1,36 @@
+---
+
+- name: Create Kubernetes config directory.
+  ansible.builtin.file:
+    path: "/root/.kube"
+    state: directory
+
+- name: Copy admin.conf to Home directory.
+  ansible.builtin.copy:
+    src: "{{ config_path }}/admin.conf"
+    dest: "/root/.kube/config"
+    owner: "root"
+    group: "root"
+    mode: 0600
+    remote_src: true
+
+- name: Copy join-worker.sh from config_path.
+  ansible.builtin.copy:
+    src: "{{ config_path }}/join-worker.sh"
+    dest: "/root/join-worker.sh"
+    mode: 0755
+    remote_src: true
+
+- name: Join cluster.
+  ansible.builtin.shell: |
+    /root/join-worker.sh | tee -a {{ log_path }}/kubeadm-join-worker.log
+  args:
+    executable: /bin/bash
+  register: join_worker_result
+
+- name: Set worker node label.
+  when: join_worker_result is succeeded
+  ansible.builtin.shell: |
+    kubectl label node $(hostname -s) node-role.kubernetes.io/worker=worker
+  args:
+    executable: /bin/bash

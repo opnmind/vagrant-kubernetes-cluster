@@ -1,0 +1,178 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+- name: Set CRIO Version.
+  ansible.builtin.set_fact:
+    crio_version: "{{ kubernetes_version | regex_search('[0-9]+\\.[0-9]+') }}"
+
+- name: Debug crio_version.
+  ansible.builtin.debug:
+    msg: "crio_version: {{ crio_version }}"
+
+- name: Ansible Update Cache and Upgrade all packages.
+  ansible.builtin.apt:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Install Basic packages.
+  ansible.builtin.apt:
+    pkg:
+      - jq
+      - bash-completion
+    state: latest
+
+- name: Copy the crio.conf file to load the modules at bootup.
+  ansible.builtin.copy:
+    src: files/crio.conf
+    dest: /etc/modules-load.d/crio.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the overlay module.
+  community.general.modprobe:
+    name: overlay
+    state: present
+
+- name: Add the br_netfilter module.
+  community.general.modprobe:
+    name: br_netfilter
+    state: present
+
+- name: Copy the crio.conf file to load the modules at bootup.
+  ansible.builtin.copy:
+    src: files/99-kubernetes-cri.conf
+    dest: /etc/sysctl.d/99-kubernetes-cri.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Set sysctl net.bridge.bridge-nf-call-iptables.
+  ansible.posix.sysctl:
+    name: net.bridge.bridge-nf-call-iptables
+    value: "1"
+    state: present
+    reload: true
+
+- name: Set sysctl net.ipv4.ip_forward.
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    reload: true
+
+- name: Set sysctl net.bridge.bridge-nf-call-ip6tables.
+  ansible.posix.sysctl:
+    name: net.bridge.bridge-nf-call-ip6tables
+    value: "1"
+    state: present
+    reload: true
+
+- name: Get devel:kubic:libcontainers:stable deps key.
+  ansible.builtin.get_url:
+    url: "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/{{ crio_version }}/{{ os }}/Release.key"
+    dest: /etc/apt/trusted.gpg.d/libcontainers-deps.asc
+
+- name: Add devel:kubic:libcontainers:stable.list deps repository into sources list.
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/trusted.gpg.d/libcontainers-deps.asc] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/{{ os }}/ /"
+    filename: devel:kubic:libcontainers:stable.list
+    state: present
+    update_cache: true
+
+- name: Get devel:kubic:libcontainers:stable key.
+  ansible.builtin.get_url:
+    url: "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/{{ os }}/Release.key"
+    dest: /etc/apt/trusted.gpg.d/libcontainers.asc
+
+- name: "Add devel:kubic:libcontainers:stable:cri-o:{{ crio_version }}.list repository into sources list."
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/trusted.gpg.d/libcontainers.asc] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/{{ crio_version }}/{{ os }}/ /"
+    filename: "devel:kubic:libcontainers:stable:cri-o:{{ crio_version }}.list"
+    state: present
+    update_cache: true
+
+- name: Install cri-o packages.
+  ansible.builtin.apt:
+    pkg:
+      - cri-o
+      - cri-o-runc
+      - cri-tools
+      - containernetworking-plugins
+    state: latest
+    update_cache: true
+
+- name: Just force systemd to reread configs (2.4 and above).
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Enable service crio and ensure it is not masked.
+  ansible.builtin.systemd:
+    name: crio
+    enabled: true
+    masked: false
+    state: started
+
+- name: Add Google Kubernetes key.
+  ansible.builtin.get_url:
+    url: "https://packages.cloud.google.com/apt/doc/apt-key.gpg"
+    dest: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+
+- name: "Add Google Kubernetes repository into sources list."
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main"
+    filename: /etc/apt/sources.list.d/kubernetes.list
+    state: present
+    update_cache: true
+
+- name: Install Kubernetes packages.
+  ansible.builtin.apt:
+    pkg:
+      - kubelet={{ kubernetes_version }}
+      - kubectl={{ kubernetes_version }}
+      - kubeadm={{ kubernetes_version }}
+      - etcd-client
+    state: present
+    update_cache: true
+
+- name: Hold kubelet.
+  ansible.builtin.dpkg_selections:
+    name: kubelet
+    selection: hold
+
+- name: Hold kubectl.
+  ansible.builtin.dpkg_selections:
+    name: kubectl
+    selection: hold
+
+- name: Hold kubeadm.
+  ansible.builtin.dpkg_selections:
+    name: kubeadm
+    selection: hold
+
+- name: Add kubelet extra arg.
+  ansible.builtin.template:
+    src: templates/kubelet.j2
+    dest: /etc/default/kubelet
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable service kubelet and ensure it is not masked.
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+    masked: false
+
+- name: Install kubectl bash-completion.
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl completion bash | tee /etc/bash_completion.d/kubectl > /dev/null
+    echo 'alias k=kubectl' | tee -a /etc/bash.bashrc > /dev/null
+    echo 'complete -o default -F __start_kubectl k' | tee -a /etc/bash.bashrc > /dev/null
+  args:
+    executable: /bin/bash
+
+- name: Remove useless packages from the cache
+  ansible.builtin.apt:
+    autoclean: true

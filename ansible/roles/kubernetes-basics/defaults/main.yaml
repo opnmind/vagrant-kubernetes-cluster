@@ -1,0 +1,4 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+kubernetes_version: 1.26.1-00
+os: xUbuntu_22.04

@@ -1,0 +1,23 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+- name: Ansible Update Cache and Upgrade all packages.
+  ansible.builtin.apt:
+    name: "*"
+    state: latest
+    update_cache: yes
+
+- name: Install haproxy packages.
+  ansible.builtin.apt:
+    pkg:
+      - haproxy
+    state: latest
+
+- name: Add master IP's settings to haproxy.cfg.
+  ansible.builtin.template:
+    src: templates/haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Restart haproxy

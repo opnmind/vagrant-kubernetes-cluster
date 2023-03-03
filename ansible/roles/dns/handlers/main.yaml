@@ -1,0 +1,6 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+- name: Restart service systemd-resolved.
+  ansible.builtin.service:
+    name: systemd-resolved
+    state: restarted

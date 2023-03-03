@@ -1,0 +1,240 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+- name: Delete config_path if new install.
+  when: master_type == "single" or node == 1
+  ansible.builtin.file:
+    path: "{{ config_path }}"
+    state: absent
+
+- name: Delete log_path if new install.
+  when: master_type == "single" or node == 1
+  ansible.builtin.file:
+    path: "{{ log_path }}"
+    state: absent
+
+- name: Create config_path directory.
+  ansible.builtin.file:
+    path: "{{ config_path }}"
+    state: directory
+    mode: 0755
+
+- name: Create log_path directory.
+  ansible.builtin.file:
+    path: "{{ log_path }}"
+    state: directory
+    mode: 0755
+
+- name: Reset Kubernetes Cluster.
+  ansible.builtin.shell: |
+    kubeadm reset --force
+  args:
+    executable: /bin/bash
+
+- name: Create Kubernetes certificate-key.
+  when:
+    - certificate_key is not defined
+    - node == 1
+  ansible.builtin.shell: |
+    kubeadm certs certificate-key
+  register: certificate_key
+
+- name: Create Kubernetes token.
+  when: 
+    - token is not defined
+    - node == 1
+  ansible.builtin.shell: |
+    kubeadm token generate
+  register: token
+
+- name: Pull Kubernetes images.
+  when: 
+    - token is defined
+    - node == 1
+  ansible.builtin.shell: |
+    kubeadm config images pull
+  
+- name: Init Kubernetes Cluster [single].
+  when: 
+    - master_type == "single"
+    - node == 1
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubeadm init \
+        --certificate-key="{{ certificate_key.stdout }}" \
+        --apiserver-advertise-address="{{ local_ip }}" \
+        --apiserver-cert-extra-sans="{{ master_hostname }}.{{ lab_domain }}" \
+        --pod-network-cidr="{{ pod_cidr }}" \
+        --service-cidr="{{ service_cidr }}" \
+        --token="{{ token.stdout }}" \
+        --upload-certs \
+        --v=5 \
+        --ignore-preflight-errors Swap | tee /vagrant/logs/kubeadm-init.log
+  args:
+    executable: /bin/bash
+  register: init_single_cluster
+
+- name: Init Kubernetes Cluster [multi].
+  when: 
+    - master_type == "multi" 
+    - node == 1
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubeadm init \
+        --control-plane-endpoint "loadbalancer.{{ lab_domain }}:6443" \
+        --certificate-key="{{ certificate_key.stdout }}" \
+        --apiserver-advertise-address="{{ local_ip }}" \
+        --apiserver-cert-extra-sans="{{ master_hostname }}.{{ lab_domain }}" \
+        --apiserver-cert-extra-sans="loadbalancer.{{ lab_domain }}" \
+        --pod-network-cidr="{{ pod_cidr }}" \
+        --service-cidr="{{ service_cidr }}" \
+        --token="{{ token.stdout }}" \
+        --upload-certs \
+        --ignore-preflight-errors Swap | tee {{ log_path }}/kubeadm-init.log
+  args:
+    executable: /bin/bash
+  register: init_multi_cluster
+
+- name: Get join statement.
+  when:
+    - init_single_cluster is succeeded or init_multi_cluster is succeeded 
+    - node == 1
+  ansible.builtin.shell: |
+    kubeadm token create --print-join-command
+  register: join_worker
+
+- name: Save join-worker.sh to config_path.
+  when:
+    - init_single_cluster is succeeded or init_multi_cluster is succeeded 
+    - node == 1
+  ansible.builtin.copy:
+    content: "{{ join_worker.stdout }}"
+    dest: "{{ config_path }}/join-worker.sh"
+    mode: 0755
+    remote_src: true
+
+- name: Get join master statement.
+  when: 
+    - master_type == "multi"
+    - node == 1
+  ansible.builtin.set_fact:
+    join_master: "{{ join_worker.stdout }} --control-plane --certificate-key {{ certificate_key.stdout }} --v=5"
+
+- name: Save join-master.sh to config_path.
+  when: 
+    - master_type == "multi"
+    - node == 1
+  ansible.builtin.copy:
+    content: "{{ join_master }}"
+    dest: "{{ config_path }}/join-master.sh"
+    mode: 0755
+    remote_src: true
+
+- name: Copy join-master.sh from config_path.
+  when: 
+    - master_type == "multi"
+    - node > 1
+  ansible.builtin.copy:
+    src: "{{ config_path }}/join-master.sh"
+    dest: "/root/join-master.sh"
+    mode: 0755
+    remote_src: true
+
+- name: Join multi master.
+  when: 
+    - master_type == "multi"
+    - node > 1
+  ansible.builtin.shell: "$(cat /root/join-master.sh) --apiserver-advertise-address {{ local_ip }} | tee -a {{ log_path }}/kubeadm-join-master.log"
+
+- name: Copy admin.conf to config_path.
+  when: node == 1
+  ansible.builtin.copy:
+    src: "/etc/kubernetes/admin.conf"
+    dest: "{{ config_path }}"
+    owner: "vagrant"
+    group: "vagrant"
+    mode: 0600
+    remote_src: true
+
+- name: Create Kubernetes config directory.
+  ansible.builtin.file:
+    path: "/home/vagrant/.kube"
+    state: directory
+
+- name: Copy admin.conf to Home directory.
+  ansible.builtin.copy:
+    src: "{{ config_path }}/admin.conf"
+    dest: "/home/vagrant/.kube/config"
+    owner: "vagrant"
+    group: "vagrant"
+    mode: 0600
+    remote_src: true
+
+- name: Create Kubernetes config root directory.
+  ansible.builtin.file:
+    path: "/root/.kube"
+    state: directory
+
+- name: Copy admin.conf to root directory.
+  ansible.builtin.copy:
+    src: "{{ config_path }}/admin.conf"
+    dest: "/root/.kube/config"
+    owner: "root"
+    group: "root"
+    mode: 0600
+    remote_src: true
+
+- name: Fetch Network Plugin Version.
+  when: node == 1
+  ansible.builtin.shell: |
+    curl --silent https://api.github.com/repos/projectcalico/calico/releases/latest | jq -r .tag_name
+  args:
+    executable: /bin/bash
+  register: network_plugin_url
+
+- name: Install Network Plugin.
+  when: node == 1
+  ansible.builtin.shell: |
+    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/"{{ network_plugin_url.stdout }}"/manifests/calico.yaml
+  args:
+    executable: /bin/bash
+
+- name: Download Metrics Server [single]
+  when: 
+    - master_type == "single"
+    - node == 1
+  ansible.builtin.get_url:
+    url: "{{ url_metrics_server }}"
+    dest: /home/vagrant/components.yaml
+
+- name: Download Metrics Server [multi]
+  when: 
+    - master_type == "multi"
+    - node == 1
+  ansible.builtin.get_url:
+    url: "{{ url_metrics_server_ha }}"
+    dest: /home/vagrant/components.yaml
+
+- name: Apply patch to Metrics Server [single]
+  when: 
+    - master_type == "single"
+    - node == 1
+  ansible.posix.patch:
+    src: files/metrics-server.patch
+    dest: /home/vagrant/components.yaml
+    remote_src: false
+
+- name: Apply patch to Metrics Server [multi]
+  when: 
+    - master_type == "multi"
+    - node == 1
+  ansible.posix.patch:
+    src: files/metrics-server.ha.patch
+    dest: /home/vagrant/components.yaml
+    remote_src: false
+
+- name: Install Metrics Server.
+  when: 
+    - node == 1
+  ansible.builtin.shell: kubectl apply -f ./components.yaml
+  args:
+    executable: /bin/bash

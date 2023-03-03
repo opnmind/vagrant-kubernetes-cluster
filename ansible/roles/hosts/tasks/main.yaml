@@ -1,0 +1,9 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+- name: Add hosts settings /etc/hosts.
+  ansible.builtin.template:
+    src: templates/hosts.j2
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: '0644'

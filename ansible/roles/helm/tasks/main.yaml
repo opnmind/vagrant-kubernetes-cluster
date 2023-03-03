@@ -1,0 +1,35 @@
+---
+- name: Download helm gpg key.
+  ansible.builtin.get_url:
+    url: "https://baltocdn.com/helm/signing.asc"
+    dest: /usr/share/keyrings/helm.gpg
+
+- name: Install helm gpg key.
+  ansible.builtin.shell: |
+    cat /usr/share/keyrings/helm.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+  args:
+    executable: /bin/bash
+
+- name: "Add Helm repository into sources list."
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main"
+    filename: /etc/apt/sources.list.d/helm-stable-debian
+    state: present
+    update_cache: true
+
+- name: Install helm packages.
+  ansible.builtin.apt:
+    pkg:
+      - helm
+    state: present
+
+- name: Add repos to helm.
+  ansible.builtin.shell: |
+    helm repo add stable https://charts.helm.sh/stable
+    helm repo add incubator https://charts.helm.sh/incubator
+    helm repo add bitnami https://charts.bitnami.com/bitnami
+    helm repo update
+  args:
+    executable: /bin/bash
+  register: helm_output
+  changed_when: helm_output.rc != 0

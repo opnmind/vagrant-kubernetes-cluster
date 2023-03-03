@@ -1,0 +1,12 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+- hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: dns
+    - role: hosts
+    - role: kubernetes-workstation
+    - role: helm
+    - role: kubernetes-dashboard

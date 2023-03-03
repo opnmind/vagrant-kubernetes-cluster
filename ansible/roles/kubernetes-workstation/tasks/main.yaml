@@ -1,0 +1,62 @@
+---
+- name: Ansible Update Cache and Upgrade all packages.
+  ansible.builtin.apt:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Install Basic packages.
+  ansible.builtin.apt:
+    pkg:
+      - jq
+      - bash-completion
+      - apt-transport-https
+      - ca-certificates
+      - curl
+    state: present
+
+- name: Add Google Kubernetes key.
+  ansible.builtin.get_url:
+    url: "https://packages.cloud.google.com/apt/doc/apt-key.gpg"
+    dest: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+
+- name: "Add Google Kubernetes repository into sources list."
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main"
+    filename: /etc/apt/sources.list.d/kubernetes
+    state: present
+    update_cache: true
+
+- name: Install Kubernetes packages.
+  ansible.builtin.apt:
+    pkg:
+      - kubectl={{ kubernetes_version }}
+      - etcd-client
+    state: present
+    allow_downgrade: true
+    update_cache: true
+
+- name: Install kubectl bash-completion.
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl completion bash | tee /etc/bash_completion.d/kubectl > /dev/null
+    echo 'alias k=kubectl' | tee -a /etc/bash.bashrc > /dev/null
+    echo 'complete -o default -F __start_kubectl k' | tee -a /etc/bash.bashrc > /dev/null
+  args:
+    executable: /bin/bash
+  register: kubectl_completion_output
+  changed_when: kubectl_completion_output.rc != 0
+
+- name: Create Kubernetes config directory.
+  ansible.builtin.file:
+    path: "/home/vagrant/.kube"
+    state: directory
+
+- name: Copy admin.conf to Home directory.
+  ansible.builtin.copy:
+    src: "{{ config_path }}/admin.conf"
+    dest: "/home/vagrant/.kube/config"
+    owner: "vagrant"
+    group: "vagrant"
+    mode: 0600
+    remote_src: true

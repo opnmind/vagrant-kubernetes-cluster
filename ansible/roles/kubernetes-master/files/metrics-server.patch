@@ -1,0 +1,21 @@
+--- components.yaml	2023-03-01 19:55:02.624504365 +0000
++++ components.single.yaml	2023-03-01 19:58:35.362712451 +0000
+@@ -130,11 +130,17 @@
+       labels:
+         k8s-app: metrics-server
+     spec:
++      tolerations:
++      - key: "node-role.kubernetes.io/control-plane"
++        operator: "Exists"
++        effect: "NoSchedule"
++      hostNetwork: true
+       containers:
+       - args:
+         - --cert-dir=/tmp
+         - --secure-port=4443
+-        - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
++        - --kubelet-insecure-tls=true
++        - --kubelet-preferred-address-types=InternalIP
+         - --kubelet-use-node-status-port
+         - --metric-resolution=15s
+         image: k8s.gcr.io/metrics-server/metrics-server:v0.6.2

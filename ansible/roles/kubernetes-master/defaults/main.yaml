@@ -1,0 +1,5 @@
+---
+config_path: /vagrant/configs
+log_path: /vagrant/logs
+url_metrics_server: https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+url_metrics_server_ha: https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml

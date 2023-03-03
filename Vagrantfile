@@ -9,12 +9,18 @@ class KubernetesLab
     @NUM_MASTER_NODES = @settings["nodes"]["master"]["count"]
     @NUM_WORKER_NODES = @settings["nodes"]["worker"]["count"]
     @hosts = Array[]
+    @masterIps = Array[]
+    @workerIps = Array[]
+    @loadbalancerIp = ""
+    @workstationIp = ""
 
     puts "---- Provisioned with k8s #{@settings["application"]["kubernetes"]}"
     #puts "---- Container runtime is: #{CONTAINER_RUNTIME}"
     #puts "---- CNI Provider is: #{CNI_PROVIDER}"
     puts "---- #{@settings["nodes"]["master"]["count"]} Masters Nodes"
     puts "---- #{@settings["nodes"]["worker"]["count"]} Worker(s) Node(s)"
+
+    self.getHosts()
   end
 
   def defineIp(type, i)
@@ -30,35 +36,39 @@ class KubernetesLab
     end
   end
 
-  def createLoadbalancer(config)
-    controlPlanIps = Array[]
-    loadbalancerIp = self.defineIp("loadbalancer", 0)
-    @hosts.push("#{loadbalancerIp} loadbalancer.#{@settings["network"]["lab_domain"]} loadbalancer.local loadbalancer")
+  def getHosts()
+    if @NUM_MASTER_NODES > 1
+      @loadbalancerIp = self.defineIp("loadbalancer", 0)
+      @hosts.push("#{@loadbalancerIp} loadbalancer.#{@settings["network"]["lab_domain"]} loadbalancer.local loadbalancer")
+    end
 
     (0..@NUM_MASTER_NODES-1).each do |m|
-      controlPlanIp = self.defineIp("master", m)
-      controlPlanIps.push(controlPlanIp)
-      @hosts.push("#{controlPlanIp} master-#{m+1}.#{@settings["network"]["lab_domain"]} master-#{m+1}.local master-#{m+1}")
+      masterIp = self.defineIp("master", m)
+      @masterIps.push(masterIp)
+      @hosts.push("#{masterIp} master-#{m+1}.#{@settings["network"]["lab_domain"]} master-#{m+1}.local master-#{m+1}")
     end
 
     (0..@NUM_WORKER_NODES-1).each do |w|
-      worker_Ip = self.defineIp("worker", w)
-      @hosts.push("#{worker_Ip} worker-#{w+1}.#{@settings["network"]["lab_domain"]} worker-#{w+1}.local worker-#{w+1}")
+      workerIp = self.defineIp("worker", w)
+      @workerIps.push(workerIp)
+      @hosts.push("#{workerIp} worker-#{w+1}.#{@settings["network"]["lab_domain"]} worker-#{w+1}.local worker-#{w+1}")
     end
 
-    workstation_Ip = self.defineIp("workstation", 0)
-    @hosts.push("#{workstation_Ip} workstation.#{@settings["network"]["lab_domain"]} workstation.local workstation")
+    @workstationIp = self.defineIp("workstation", 0)
+    @hosts.push("#{@workstationIp} workstation.#{@settings["network"]["lab_domain"]} workstation.local workstation")
+  end
 
+  def createLoadbalancer(config)
     if @NUM_MASTER_NODES <= 1
       return
     end
     
-    puts "The Loadbalancer IP is #{loadbalancerIp}."
+    puts "The Loadbalancer IP is #{@loadbalancerIp}."
 
     config.vm.define "loadbalancer" do |loadbalancer|
       loadbalancer.vm.hostname = "loadbalancer"
-      loadbalancer.vm.box = @settings["application"]["box"]      
-      loadbalancer.vm.network "private_network", ip: loadbalancerIp
+      loadbalancer.vm.box = @settings["application"]["box"]
+      loadbalancer.vm.network "private_network", ip: @loadbalancerIp
       loadbalancer.vm.network "forwarded_port", guest: 6443, host: 6443
 
       loadbalancer.vm.provider "virtualbox" do |vb|
@@ -71,21 +81,20 @@ class KubernetesLab
         if @settings["cluster_name"] and @settings["cluster_name"] != ""
           vb.customize ["modifyvm", :id, "--groups", ("/" + @settings["cluster_name"])]
         end
+
+        loadbalancer.vm.provision "ansible" do |ansible|
+          ansible.verbose = "v"
+          ansible.playbook = "ansible/playbook-haproxy.yaml"
+          ansible.extra_vars = {
+            dns_servers: @settings["network"]["dns_servers"],
+            lab_domain: @settings["network"]["lab_domain"],
+            local_ip: @loadbalancerIp,
+            master_ips: @masterIps,
+            num_master_count: @NUM_WORKER_NODES,
+            hosts_entries: @hosts
+          }
+        end
       end
-
-      loadbalancer.vm.provision "shell",
-        env: {
-        "MASTER_IPS" =>  controlPlanIps.join(","),
-        "LOADBALANCER_IP" => loadbalancerIp,
-        "LAB_DOMAIN" => @settings["network"]["lab_domain"],
-        "DNS_SERVERS" => @settings["network"]["dns_servers"].join(" ")
-        }, 
-        path: "scripts/haproxy.sh"
-
-      $script = <<-SCRIPT
-        echo "#{@hosts.join("\n")}" >> /etc/hosts
-      SCRIPT
-      loadbalancer.vm.provision "shell", inline: $script
     end
   end
 
@@ -118,30 +127,25 @@ class KubernetesLab
           masterType = "single"
         end
 
-        $script = <<-SCRIPT
-          echo "#{@hosts.join("\n")}" >> /etc/hosts
-        SCRIPT
-        master.vm.provision "shell", inline: $script
-
-        master.vm.provision "shell", 
-          env: {
-            "DNS_SERVERS" => @settings["network"]["dns_servers"].join(" "),
-            "KUBERNETES_VERSION" => @settings["application"]["kubernetes"],
-            "OS" => @settings["application"]["os"]
-          },
-          path: "scripts/common.sh"
-
-        master.vm.provision "shell", 
-          env: {
-            "MASTER_IP" => masterIp,
-            "MASTER_HOSTNAME" => "master-#{i}",
-            "MASTER_TYPE" => masterType,
-            "LAB_DOMAIN" => @settings["network"]["lab_domain"],
-            "POD_CIDR" => @settings["network"]["pod_cidr"],
-            "SERVICE_CIDR" => @settings["network"]["service_cidr"],
-            "KUBERNETES_VERSION" => @settings["application"]["kubernetes"]
-          },
-          path: "scripts/master.sh"
+        master.vm.provision "ansible" do |ansible|
+          ansible.verbose = "v"
+          ansible.playbook = "ansible/playbook-master.yaml"
+          ansible.extra_vars = {
+            dns_servers: @settings["network"]["dns_servers"],
+            lab_domain: @settings["network"]["lab_domain"],
+            kubernetes_version: @settings["application"]["kubernetes"],
+            os: @settings["application"]["os"],
+            pod_cidr: @settings["network"]["pod_cidr"],
+            service_cidr: @settings["network"]["service_cidr"],
+            local_ip: masterIp,
+            master_ips: @masterIps,
+            num_master_count: @NUM_WORKER_NODES,
+            hosts_entries: @hosts,
+            master_type: masterType,
+            master_hostname: "master-#{i}",
+            node: i
+          }
+        end
       end
     end
   end
@@ -173,32 +177,23 @@ class KubernetesLab
           end
         end
 
-        $script = <<-SCRIPT
-          echo "#{@hosts.join("\n")}" >> /etc/hosts
-        SCRIPT
-        worker.vm.provision "shell", inline: $script
-
-        worker.vm.provision "shell",
-          env: {
-            "DNS_SERVERS" => @settings["network"]["dns_servers"].join(" "),
-            "KUBERNETES_VERSION" => @settings["application"]["kubernetes"],
-            "OS" => @settings["application"]["os"]
-          },
-          path: "scripts/common.sh"
-        
-        worker.vm.provision "shell", 
-          env: {
-            "WORKER_IP" => workerIp,
-            "WORKER_HOSTNAME" => "worker-#{i}",
-            "MASTER_TYPE" => masterType,
-            "LAB_DOMAIN" => @settings["network"]["lab_domain"],
-            "POD_CIDR" => @settings["network"]["pod_cidr"],
-            "SERVICE_CIDR" => @settings["network"]["service_cidr"],
-            "KUBERNETES_VERSION" => @settings["application"]["kubernetes"]
-          },
-          path: "scripts/worker.sh"
+        worker.vm.provision "ansible" do |ansible|
+          ansible.verbose = "v"
+          ansible.playbook = "ansible/playbook-worker.yaml"
+          ansible.extra_vars = {
+            dns_servers: @settings["network"]["dns_servers"],
+            lab_domain: @settings["network"]["lab_domain"],
+            kubernetes_version: @settings["application"]["kubernetes"],
+            os: @settings["application"]["os"],
+            pod_cidr: @settings["network"]["pod_cidr"],
+            service_cidr: @settings["network"]["service_cidr"],
+            local_ip: workerIp,
+            master_ips: @masterIps,
+            num_master_count: @NUM_WORKER_NODES,
+            hosts_entries: @hosts
+          }
+        end
       end
-
     end
   end
 
@@ -225,20 +220,21 @@ class KubernetesLab
         vb.customize ["modifyvm", :id, "--groups", ("/" + @settings["cluster_name"])]
       end
 
-      $script = <<-SCRIPT
-        echo "#{@hosts.join("\n")}" >> /etc/hosts
-      SCRIPT
-      workstation.vm.provision "shell", inline: $script
-
-      workstation.vm.provision "shell", 
-        env: {
-          "LAB_DOMAIN" => @settings["network"]["lab_domain"],
-          "POD_CIDR" => @settings["network"]["pod_cidr"],
-          "SERVICE_CIDR" => @settings["network"]["service_cidr"],
-          "DNS_SERVERS" => @settings["network"]["dns_servers"].join(" "),
-          "KUBERNETES_VERSION" => @settings["application"]["kubernetes"]
-        },
-        path: "scripts/workstation.sh"
+      workstation.vm.provision "ansible" do |ansible|
+        ansible.verbose = "v"
+        ansible.playbook = "ansible/playbook-workstation.yaml"
+        ansible.extra_vars = {
+          dns_servers: @settings["network"]["dns_servers"],
+          lab_domain: @settings["network"]["lab_domain"],
+          kubernetes_version: @settings["application"]["kubernetes"],
+          os: @settings["application"]["os"],
+          pod_cidr: @settings["network"]["pod_cidr"],
+          service_cidr: @settings["network"]["service_cidr"],
+          local_ip: workstationIp,
+          master_ips: @masterIps,
+          num_master_count: @NUM_WORKER_NODES,
+          hosts_entries: @hosts
+        }
       end
     end
 
@@ -251,24 +247,16 @@ end
 # you're doing.
 Vagrant.configure("2") do |config|
   kubernetesLab = KubernetesLab.new()
-
-  $script = <<-SCRIPT
-    apt-get update -y
-    apt-get dist-upgrade -y
-    apt-get install jq vim bash-completion -y
-  SCRIPT
-
-  config.vm.box_check_update = true
-  config.vm.provision "shell", inline: $script
-  config.vm.provision :reload    
-
   kubernetesLab.createLoadbalancer(config)
   kubernetesLab.createControlPlane(config)
   kubernetesLab.createWorkerNode(config)
-  kubernetesLab.createWorkstation(config)  
+  kubernetesLab.createWorkstation(config) 
+
+  config.vm.box_check_update = false
+  config.vm.provision :reload
 
   config.vm.provision "shell",
     run: "always",
     inline: "swapoff -a"
-
+  end
 end

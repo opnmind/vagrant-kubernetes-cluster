@@ -1,0 +1,21 @@
+---
+- name: Create dashboard directory.
+  ansible.builtin.file:
+    path: /home/vagrant/dashboard
+    state: directory
+    mode: 0755
+
+- name: Copy dashboard.sh.
+  ansible.builtin.copy:
+    src: files/dashboard.sh
+    dest: /home/vagrant/dashboard/dashboard.sh
+    mode: 0755
+
+- name: Create a symbolic link to dashboard.sh.
+  ansible.builtin.file:
+    src: /home/vagrant/dashboard/dashboard.sh
+    dest: /usr/local/bin/dashboard
+    owner: root
+    group: root
+    state: link
+    mode: 0755

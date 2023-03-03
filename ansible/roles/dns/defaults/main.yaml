@@ -1,0 +1,5 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+dns_servers:
+  - 8.8.8.8
+  - 1.1.1.1

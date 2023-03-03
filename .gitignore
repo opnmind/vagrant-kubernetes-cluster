@@ -1,2 +1,4 @@
-config/
+configs/
+logs/
 .vagrant/
+Makefile

@@ -1,0 +1,6 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+# description: Setup Kubernetes Master multi|single.
+galaxy_info:
+  role_name: kubernetes-master
+  author: opnmind

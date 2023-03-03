@@ -1,0 +1,12 @@
+# vim: tabstop=8 expandtab shiftwidth=2 softtabstop=2
+---
+- name: Disable SWAP since kubernetes can't work with swap enabled.
+  ansible.builtin.shell: |
+    swapoff -a
+  when: ansible_facts.swaptotal_mb > 0
+
+- name: Disable SWAP in fstab since kubernetes can't work with swap enabled.
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+    replace: '# \1'
