@@ -24,7 +24,8 @@ global
         daemon
         ca-base /etc/ssl/certs
         crt-base /etc/ssl/private
-        ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+        ssl-default-bind-ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS
+        ssl-default-bind-options no-sslv3
 frontend loadbalancer
         bind *:6443
         mode tcp
@@ -42,14 +43,14 @@ backend masters
         balance roundrobin
         timeout connect 1s
         timeout queue 5s
-        timeout server 3600s
+        timeout server 10s
 EOF
 
 IFS=',' read -ra MASTER_IP_ARRAY <<< "$MASTER_IPS"
 
 i=0
 for master_ip in "${MASTER_IP_ARRAY[@]}"; do
-  echo "        server master-$i $master_ip:6443 check" >> /etc/haproxy/haproxy.cfg
+  echo "        server master-$i $master_ip:6443 check check-ssl verify none" >> /etc/haproxy/haproxy.cfg
   ((i++))
 done
 
